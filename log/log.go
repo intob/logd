@@ -1,6 +1,8 @@
 package log
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"net"
 	"time"
@@ -59,20 +61,30 @@ func (l *Logger) Log(lvl Lvl, template string, args ...interface{}) {
 		Msg:       fmt.Sprintf(template, args...),
 	})
 	if err != nil {
-		fmt.Println("logd.log pack msg err:", err)
+		fmt.Println("logd.Log pack msg err:", err)
+		return
+	}
+
+	// gzip
+	// TODO: create writer for packing messages
+	buf := &bytes.Buffer{}
+	gz := gzip.NewWriter(buf)
+	_, err = gz.Write(payload)
+	if err != nil {
+		fmt.Println("logd.Log gzip err:", err)
 		return
 	}
 
 	// get ephemeral signature
-	signedMsg, err := auth.Sign(l.Secret, payload, time.Now())
+	signedMsg, err := auth.Sign(l.Secret, buf.Bytes(), time.Now())
 	if err != nil {
-		fmt.Println("logd.log sign msg err:", err)
+		fmt.Println("logd.Log sign msg err:", err)
 		return
 	}
 
 	// write to socket
 	_, err = l.Conn.Write(signedMsg)
 	if err != nil {
-		fmt.Println("logd.log write udp err:", err)
+		fmt.Println("logd.Log write udp err:", err)
 	}
 }

@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -50,23 +52,30 @@ func (s *Webserver) handleRead(w http.ResponseWriter, r *http.Request) {
 		items := s.Buf.Read(offset32, limit32)
 		pages++
 		offset += limit
-		e := &msg.Msg{}
+		m := &msg.Msg{}
 		for _, i := range items {
-			err := cbor.Unmarshal(*i, e)
+			buf := bytes.NewBuffer(*i)
+			gzr, err := gzip.NewReader(buf)
 			if err != nil {
-				fmt.Println("failed to unmarshal entry:", err)
+				fmt.Println("handleRead: gzip reader:", err)
 				continue
 			}
-			if envQ != "" && envQ != e.Env {
+			dec := cbor.NewDecoder(gzr)
+			err = dec.Decode(m)
+			if err != nil {
+				fmt.Println("hadleRead: decode cbor:", err)
 				continue
 			}
-			if svcQ != "" && svcQ != e.Svc {
+			if envQ != "" && envQ != m.Env {
 				continue
 			}
-			if fnQ != "" && fnQ != e.Fn {
+			if svcQ != "" && svcQ != m.Svc {
 				continue
 			}
-			results = append(results, e)
+			if fnQ != "" && fnQ != m.Fn {
+				continue
+			}
+			results = append(results, m)
 		}
 	}
 	data, err := json.Marshal(results)
