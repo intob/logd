@@ -1,28 +1,33 @@
 # Logd
 ![A circular buffer](.doc/circular_buffer.svg)
 
-## At first
-Read the **onboarding** readme on GITHUB
-
-## Logs for your apps in constant time and constant space.
-Logd (pronounced "logged") is a circular buffer for writing & reading millions of logs per minute.
+## Hundreds of millions of logs for your apps in constant time and constant space.
+Logd (pronounced "logged") is a circular buffer for writing & reading millions of logs per second.
 
 Logd will never run out of memory if the buffer size is ok for the given machine spec. Reads & writes are constant-time.
 
 As the buffer becomes full, each write overwrites the oldest element.
+
+# TODO
+
+## Fix Replay Vulnerability
+There is currently no cache of UDP packet hashes, so we can't yet detect/prevent a replay.
+A ring buffer would probably be ideal for this.
+
+Estimated time start-to-prod: 2-3 hours.
+
 
 # Auth
 Logd authenticates clients for either reading or writing using 2 shared secrets.
 These are stored encrypted in our secrets SOPS file.
 
 ## Why no SSO?
-This is an important design choice for separation of concerns.
-This will probably not change.
+Writing is over UDP only, anyway. This will not change.
+This is an important design choice that ensures performance, but also separation of concerns.
 
-If you want to put it behind SSO, just write a proxy. ;)
+If you want to put the HTTP API behind SSO, just write a proxy. ;)
 
-This is a simple, performant & usable service that
-you can, and should, build on.
+This is a simple, performant & usable application that you can, and should, build on.
 
 # HTTP API
 Logd starts a http server.
@@ -33,9 +38,9 @@ curl --location "$LOGD_HOST/?limit=10" \
 ```
 ## GET /info
 
-# UDP
+# Logging (writing logs)
 ## I'd tell you a joke about UDP, but you might not get it...
-Logd is built on Protobuf.
+Logd is built on Protobuf & UDP.
 
 ## Logger
 The simplest way to write logs is using the `log` package.
