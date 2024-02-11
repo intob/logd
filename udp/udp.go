@@ -21,7 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const MaxPacketSize = 2048
+const MaxPacketSize = 1024
 
 type UdpSvc struct {
 	laddrPort           string
@@ -104,7 +104,7 @@ func (svc *UdpSvc) Listen(ctx context.Context) {
 
 	// Start the gopher party
 	packets := make(chan *Packet, 100) // Work channel with a buffer
-	numWorkers := 10
+	numWorkers := 8
 	if runtime.NumCPU() > numWorkers {
 		numWorkers = runtime.NumCPU()
 	}
