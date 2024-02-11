@@ -21,7 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const MaxPacketSize = 1024
+const MaxPacketSize = 1792 // 1.792GB for 1M packets
 
 type UdpSvc struct {
 	laddrPort           string
