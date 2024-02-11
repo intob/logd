@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -101,11 +102,12 @@ func (svc *UdpSvc) Listen(ctx context.Context) {
 	defer svc.conn.Close()
 	fmt.Println("listening udp on", svc.conn.LocalAddr())
 
-	// Setup for worker pool
-	const numWorkers = 10              // Number of workers in the pool
-	packets := make(chan *Packet, 100) // Work channel with a buffer
-
 	// Start the gopher party
+	packets := make(chan *Packet, 100) // Work channel with a buffer
+	numWorkers := 10
+	if runtime.NumCPU() > numWorkers {
+		numWorkers = runtime.NumCPU()
+	}
 	for i := 0; i < numWorkers; i++ {
 		go svc.packetWorker(packets)
 	}
