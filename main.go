@@ -55,15 +55,15 @@ func main() {
 
 	// init udp svc
 	udpSvc := udp.NewSvc(&udp.Config{
-		LaddrPort:           udpLaddrPort,
-		ReadSecret:          readSecret,
-		WriteSecret:         writeSecret,
-		RingBuf:             ringBuf,
-		AlarmSvc:            alarmSvc,
-		ConnRateLimitEvery:  100 * time.Microsecond,
-		ConnRateLimitBurst:  10,
-		QueryRateLimitEvery: 10 * time.Millisecond,
-		QueryRateLimitBurst: 10,
+		LaddrPort:              udpLaddrPort,
+		ReadSecret:             readSecret,
+		WriteSecret:            writeSecret,
+		RingBuf:                ringBuf,
+		AlarmSvc:               alarmSvc,
+		SubWriteRateLimitEvery: 100 * time.Microsecond,
+		SubWriteRateLimitBurst: 100,
+		QueryRateLimitEvery:    time.Second,
+		QueryRateLimitBurst:    10,
 	})
 	go udpSvc.Listen(ctx)
 
@@ -73,8 +73,8 @@ func main() {
 		Buf:            ringBuf,
 		UdpSvc:         udpSvc,
 		AlarmSvc:       alarmSvc,
-		RateLimitEvery: 250 * time.Millisecond,
-		RateLimitBurst: 10,
+		RateLimitEvery: time.Millisecond * 100,
+		RateLimitBurst: 100,
 	})
 	go httpSvc.ServeHttp(httpLaddrPort)
 

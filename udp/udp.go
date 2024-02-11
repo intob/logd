@@ -23,30 +23,30 @@ import (
 const MaxPacketSize = 2048
 
 type UdpSvc struct {
-	laddrPort        string
-	conn             *net.UDPConn
-	subs             map[string]*Sub
-	subsMu           sync.RWMutex
-	forSubs          chan *ProtoPair
-	connRateLimiter  *rate.Limiter
-	queryRateLimiter *rate.Limiter
-	readSecret       []byte
-	writeSecret      []byte
-	ringBuf          *ring.RingBuffer
-	unpkPool         *sync.Pool
-	alarmSvc         *alarm.Svc
+	laddrPort           string
+	conn                *net.UDPConn
+	subs                map[string]*Sub
+	subsMu              sync.RWMutex
+	forSubs             chan *ProtoPair
+	subWriteRateLimiter *rate.Limiter
+	queryRateLimiter    *rate.Limiter
+	readSecret          []byte
+	writeSecret         []byte
+	ringBuf             *ring.RingBuffer
+	unpkPool            *sync.Pool
+	alarmSvc            *alarm.Svc
 }
 
 type Config struct {
-	LaddrPort           string
-	ReadSecret          string
-	WriteSecret         string
-	RingBuf             *ring.RingBuffer
-	AlarmSvc            *alarm.Svc
-	ConnRateLimitEvery  time.Duration
-	ConnRateLimitBurst  int
-	QueryRateLimitEvery time.Duration
-	QueryRateLimitBurst int
+	LaddrPort              string
+	ReadSecret             string
+	WriteSecret            string
+	RingBuf                *ring.RingBuffer
+	AlarmSvc               *alarm.Svc
+	SubWriteRateLimitEvery time.Duration
+	SubWriteRateLimitBurst int
+	QueryRateLimitEvery    time.Duration
+	QueryRateLimitBurst    int
 }
 
 type Sub struct {
@@ -67,16 +67,16 @@ type ProtoPair struct {
 
 func NewSvc(cfg *Config) *UdpSvc {
 	return &UdpSvc{
-		laddrPort:        cfg.LaddrPort,
-		subs:             make(map[string]*Sub),
-		subsMu:           sync.RWMutex{},
-		forSubs:          make(chan *ProtoPair, 4), // small buffer helps a lot
-		connRateLimiter:  rate.NewLimiter(rate.Every(cfg.ConnRateLimitEvery), cfg.ConnRateLimitBurst),
-		queryRateLimiter: rate.NewLimiter(rate.Every(cfg.QueryRateLimitEvery), cfg.QueryRateLimitBurst),
-		readSecret:       []byte(cfg.ReadSecret),
-		writeSecret:      []byte(cfg.WriteSecret),
-		ringBuf:          cfg.RingBuf,
-		alarmSvc:         cfg.AlarmSvc,
+		laddrPort:           cfg.LaddrPort,
+		subs:                make(map[string]*Sub),
+		subsMu:              sync.RWMutex{},
+		forSubs:             make(chan *ProtoPair, 4), // small buffer helps a lot
+		subWriteRateLimiter: rate.NewLimiter(rate.Every(cfg.SubWriteRateLimitEvery), cfg.SubWriteRateLimitBurst),
+		queryRateLimiter:    rate.NewLimiter(rate.Every(cfg.QueryRateLimitEvery), cfg.QueryRateLimitBurst),
+		readSecret:          []byte(cfg.ReadSecret),
+		writeSecret:         []byte(cfg.WriteSecret),
+		ringBuf:             cfg.RingBuf,
+		alarmSvc:            cfg.AlarmSvc,
 		unpkPool: &sync.Pool{
 			New: func() any {
 				return &auth.Unpacked{
@@ -101,27 +101,23 @@ func (svc *UdpSvc) Listen(ctx context.Context) {
 	defer svc.conn.Close()
 	fmt.Println("listening udp on", svc.conn.LocalAddr())
 
-	// one gopher reads packets
-	packets := make(chan *Packet, 4)
+	// Setup for worker pool
+	const numWorkers = 10              // Number of workers in the pool
+	packets := make(chan *Packet, 100) // Work channel with a buffer
+
+	// Start the gopher party
+	for i := 0; i < numWorkers; i++ {
+		go svc.packetWorker(packets)
+	}
+
+	// Dispatcher: read packets and dispatch to workers
 	go func() {
-		fmt.Printf("packet-reading gopher started\n")
 		for {
 			svc.readPacket(packets)
 		}
 	}()
 
-	// one gopher handles packets
-	go func() {
-		fmt.Printf("packet-handling gopher started\n")
-		for {
-			svc.handlePacket(<-packets)
-		}
-	}()
-
-	// one gopher writes to the subs
 	go svc.writeToSubs()
-
-	// one gopher kicks subs that don't ping
 	go svc.kickLateSubs()
 
 	// wait for the gopher party to end
@@ -129,15 +125,26 @@ func (svc *UdpSvc) Listen(ctx context.Context) {
 	fmt.Println("stopped listening udp")
 }
 
+func (svc *UdpSvc) packetWorker(packets <-chan *Packet) {
+	for packet := range packets {
+		svc.handlePacket(packet)
+	}
+}
+
 func (svc *UdpSvc) readPacket(packets chan<- *Packet) {
 	buf := make([]byte, MaxPacketSize)
-	n, raddr, err := svc.conn.ReadFromUDPAddrPort(buf)
-	if err != nil {
-		return
-	}
-	packets <- &Packet{
-		Data:  buf[:n],
-		Raddr: raddr,
+	for {
+		n, raddr, err := svc.conn.ReadFromUDPAddrPort(buf)
+		if err != nil {
+			continue // Consider proper error handling or breaking under certain conditions
+		}
+		// Copy data to avoid slicing issues with reused buffer
+		copyBuf := make([]byte, n)
+		copy(copyBuf, buf[:n])
+		packets <- &Packet{
+			Data:  copyBuf,
+			Raddr: raddr,
+		}
 	}
 }
 
@@ -176,7 +183,7 @@ func (svc *UdpSvc) writeToSubs() {
 			if !shouldSendToSub(sub, protoPair) {
 				continue
 			}
-			svc.connRateLimiter.Wait(context.Background())
+			svc.subWriteRateLimiter.Wait(context.Background())
 			_, err := svc.conn.WriteToUDPAddrPort(protoPair.Bytes, sub.raddr)
 			if err != nil {
 				fmt.Printf("write udp err: (%s) %s\n", raddr, err)
@@ -221,6 +228,6 @@ func (svc *UdpSvc) reply(txt string, raddr netip.AddrPort) {
 		Fn:  "logd",
 		Txt: &txt,
 	})
-	svc.connRateLimiter.Wait(context.Background())
+	svc.subWriteRateLimiter.Wait(context.Background())
 	svc.conn.WriteToUDPAddrPort(payload, raddr)
 }
