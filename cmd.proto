@@ -28,6 +28,7 @@ message Msg {
   optional HttpMethod httpMethod = 9;
   optional string url = 10;
   optional int32 responseStatus = 11;
+  repeated string blame = 12;
 }
 
 message QueryParams {
@@ -43,6 +44,7 @@ message QueryParams {
   optional HttpMethod httpMethod = 10;
   optional string url = 11;
   optional int32 responseStatus = 12;
+  optional string blame = 13;
 }
 
 enum Lvl {
